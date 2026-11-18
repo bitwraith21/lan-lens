@@ -1,4 +1,4 @@
-[<video src="assets/demo.mp4" controls="controls" style="max-width: 730px;"></video>](https://ko-fi.com/bitwraith21)
+[<video src="https://github.com/bitwraith21/lan-lens/tree/master/assets/demo.mp4" controls="controls" style="max-width: 730px;"></video>](https://ko-fi.com/bitwraith21)
 
 ## Support the project
 [<img src="assets/kofi6.webp" alt="Support this project" width="200">](https://ko-fi.com/bitwraith21)
