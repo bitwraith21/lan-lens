@@ -19,6 +19,7 @@ LAN-Lens-settings*.json
 LAN-Lens-Local-CA.cer
 local-identity.pem
 dashboard-token
+browser-access-token
 .lan-lens-*
 .env
 .env.*
