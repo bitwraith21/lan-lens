@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LAN Lens Camera</title><link rel="stylesheet" href="/style.css"><script src="/client.js" defer></script></head>
+<body class="camera" data-role="camera"><main>
+<header><div><h1 id="label">LAN Lens Camera</h1><p id="status" role="status">Checking pairing link…</p></div></header>
+<section class="camera-preview" id="preview">
+ <video id="media" muted playsinline autoplay></video>
+</section>
+<section class="panel camera-controls">
+ <div class="actions"><button class="primary" id="start" disabled>Start camera</button><button id="stop" disabled>Stop</button></div>
+ <label>Camera <select id="camera"><option value="">Default camera</option></select></label>
+ <label>Lens <select id="facing"><option value="environment">Rear</option><option value="user">Front</option></select></label>
+ <label id="zoom-row" hidden>Zoom <input type="range" id="zoom" aria-describedby="zoom-tip"><output id="zoom-value" for="zoom">1.0×</output>
+   <small id="zoom-tip">Pinch on the preview to zoom.</small></label>
+ <button id="torch" hidden>Turn light on</button>
+ <label><input type="checkbox" id="portrait"> Portrait capture</label>
+ <label><input type="checkbox" id="eco"> Hide local preview</label>
+</section>
+</main></body></html>
