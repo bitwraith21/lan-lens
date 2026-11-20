@@ -1,4 +1,4 @@
-![Demo animation](assets/)
+![Demo](assets/demo.mp4)
 
 # LAN Lens for OBS
 
