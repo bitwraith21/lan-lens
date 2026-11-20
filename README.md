@@ -1,3 +1,5 @@
+![Demo animation](assets/)
+
 # LAN Lens for OBS
 
 LAN Lens receives phone or browser cameras as OBS Browser Sources and can send the same feed to other local browser displays. Pair each device with an expiring QR code. The OBS module uses C and C++ with the OBS Browser panel and Qt dock APIs. A bundled Go process serves the dashboard and phone pages, issues QR codes, and relays WebRTC session descriptions over local HTTPS. Camera audio and video travel directly between WebRTC peers. There is no PHP, database, cloud service, external STUN/TURN server, or separate language runtime to install on Windows. OBS WebSocket is optional and has no role in the camera path.
