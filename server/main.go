@@ -46,15 +46,15 @@ type client struct {
 	queue               []message
 }
 type app struct {
-	mu          sync.Mutex
-	dialog      sync.Mutex
-	cfg         settings
-	path, admin string
-	authority   *authority
-	addresses   []string
-	invitations map[string]invitation
-	grants      map[string]grant
-	clients     map[string]*client
+	mu                         sync.Mutex
+	dialog                     sync.Mutex
+	cfg                        settings
+	path, admin, browserAccess string
+	authority                  *authority
+	addresses                  []string
+	invitations                map[string]invitation
+	grants                     map[string]grant
+	clients                    map[string]*client
 }
 
 func main() {
@@ -90,6 +90,9 @@ func run(dir string) error {
 	}
 	if a.authority, err = loadAuthority(dir); err != nil {
 		return err
+	}
+	if a.browserAccess, err = loadBrowserAccess(dir); err != nil {
+		return fmt.Errorf("browser access: %w", err)
 	}
 	local, err := net.Listen("tcp4", localAddr)
 	if err != nil {
@@ -156,8 +159,22 @@ func (a *app) handler(local bool) http.Handler {
 				reply(w, map[string]bool{"ready": true})
 				return
 			}
+		case "/api/browser-access":
+			if local && r.Method == "POST" {
+				if !same(auth(r), a.admin) {
+					fail(w, http.StatusUnauthorized, "Open the browser again from the LAN Lens dock.")
+					return
+				}
+				reply(w, map[string]string{"credential": a.browserAccess})
+				return
+			}
 		case "/api/admin":
-			if local && r.Method == "POST" && same(auth(r), a.admin) {
+			if local && r.Method == "POST" {
+				key := auth(r)
+				if !same(key, a.admin) && !same(key, a.browserAccess) {
+					fail(w, http.StatusUnauthorized, "Open the browser from the LAN Lens dock.")
+					return
+				}
 				a.manage(w, r)
 				return
 			}

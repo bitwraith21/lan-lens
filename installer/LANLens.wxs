@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension">
-  <Product Id="*" Name="LAN Lens for OBS" Language="1033" Version="0.2.0"
+  <Product Id="*" Name="LAN Lens for OBS" Language="1033" Version="0.2.1"
            Manufacturer="LAN Lens" UpgradeCode="{16C5D862-47FF-49EC-80B1-E20519DF35FC}">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of LAN Lens is already installed." Schedule="afterInstallInitialize" />

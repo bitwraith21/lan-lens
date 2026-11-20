@@ -124,3 +124,20 @@ func saveSettings(path string, cfg settings) error {
 }
 
 var errPickerCanceled = errors.New("file picker cancelled")
+
+func loadBrowserAccess(dir string) (string, error) {
+	path := filepath.Join(dir, "browser-access-token")
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		key := randomID(24)
+		return key, writeAtomic(path, []byte(key))
+	}
+	if err != nil {
+		return "", err
+	}
+	key := string(data)
+	if !keyPattern.MatchString(key) {
+		return "", errors.New("invalid browser credential file")
+	}
+	return key, nil
+}

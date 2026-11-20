@@ -3,6 +3,12 @@
 <title>LAN Lens for OBS</title><link rel="stylesheet" href="/style.css"><script src="/dashboard.js" defer></script></head>
 <body class="dashboard"><main>
 <header><div><h1>LAN Lens for OBS</h1><p>Send a phone camera to OBS or a LAN display.</p></div><span class="network" id="network"></span></header>
+<section class="panel" id="browser-access" hidden>
+ <h2>Connect this browser once</h2>
+ <p>In OBS, open <strong>Docks → LAN Lens for OBS</strong> and click <strong>Open in Browser</strong>.</p>
+ <p>You can return to this address in the same browser profile while OBS is open.</p>
+</section>
+<div id="dashboard-controls" hidden>
 <section class="panel">
  <div class="section-head"><h2>Camera feeds</h2><button id="add" class="primary">Add feed</button></div>
  <div id="feeds" class="feeds"></div>
@@ -18,7 +24,8 @@
  <div class="actions migration"><button id="import">Import settings…</button><button id="export">Export settings…</button></div>
  <p class="muted">Settings include feed IDs, viewer links, rotation and camera preferences. An imported LAN address is used if available on this computer.</p>
 </section>
-<p id="notice" role="status" aria-live="polite"></p>
+</div>
+<p id="notice" role="status" aria-live="polite">Connecting to LAN Lens…</p>
 <dialog id="pair"><div class="section-head"><h2 id="pair-title"></h2><button id="close">Close</button></div>
  <img id="qr" width="280" height="280" alt="Pairing QR code"><p id="pair-expires"></p><button id="copy">Copy pairing link</button><input id="pair-link" aria-label="Pairing link" readonly hidden>
 </dialog>

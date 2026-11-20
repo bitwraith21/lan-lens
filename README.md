@@ -5,8 +5,8 @@ LAN Lens receives phone or browser cameras as OBS Browser Sources and can send t
 ## Windows x64
 
 1. Install the full OBS Studio 33.x build, version 33.0.1 or later, and close OBS.
-2. Run `LAN-Lens-0.2.0-Windows-x64.msi` with administrator approval. The MSI is unsigned. Setup checks for running OBS processes, a compatible OBS install, Browser Source and its Chromium files, and the required Windows and Visual C++ runtime files.
-3. Launch OBS and open **Docks → LAN Lens for OBS**. **Tools → LAN Lens for OBS** also shows the dock. Choose **Open in Browser** to open the same dashboard in your browser. Both views share feeds, settings and pairing codes. Select a scene and click **Add to OBS** on the feed you want. OBS creates an audio-enabled Browser Source.
+2. Run `LAN-Lens-0.2.1-Windows-x64.msi` with administrator approval. The MSI is unsigned. Setup checks for running OBS processes, a compatible OBS install, Browser Source and its Chromium files, and the required Windows and Visual C++ runtime files.
+3. Launch OBS and open **Docks → LAN Lens for OBS**. **Tools → LAN Lens for OBS** also shows the dock. Choose **Open in Browser** to open the same dashboard in your browser. Both views share feeds, settings and pairing codes. Open the browser from the dock once per browser profile. After that, you can revisit or bookmark http://127.0.0.1:48640/ while OBS is open. Select a scene and click **Add to OBS** on the feed you want. OBS creates an audio-enabled Browser Source.
 
 The MSI installs to `%ProgramData%\obs-studio\plugins\lan-lens`. It attempts to add a Windows Firewall rule restricted to the companion executable, TCP 48641, the private profile, and the local subnet. Custom OBS installs can pass `OBSROOT` to MSI setup. Portable OBS uses its own plugin folder, so for a portable installation copy the build output's `lan-lens` folder to `<portable OBS>\plugins\`.
 
@@ -42,7 +42,7 @@ Use LLVM for the MSVC ABI, a Visual Studio x64 Developer PowerShell or a local x
 
 ```powershell
 .\scripts\build-windows.ps1 -ObsRoot 'C:\Program Files\obs-studio' -ObsSdk C:\src\obs-studio -BrowserSdk C:\src\obs-studio\plugins\obs-browser -QtSdk C:\tools\obs-qt6 -LlvmBin "C:\Program Files\LLVM\bin"
-.\scripts\package-windows.ps1 -Stage .\build\lan-lens -LlvmBin C:\tools\llvm-mingw\bin -WixBin C:\tools\wix -Output .\build\LAN-Lens-0.2.0-Windows-x64.msi
+.\scripts\package-windows.ps1 -Stage .\build\lan-lens -LlvmBin C:\tools\llvm-mingw\bin -WixBin C:\tools\wix -Output .\build\LAN-Lens-0.2.1-Windows-x64.msi
 ```
 
 The OBS log reports plugin loading and Browser Source creation. The companion's startup errors are recorded under `plugin_config/lan-lens/service/server.log` in the OBS configuration directory.

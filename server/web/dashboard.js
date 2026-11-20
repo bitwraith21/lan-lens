@@ -1,8 +1,22 @@
 "use strict";
 const $ = id => document.getElementById(id);
-const key = location.hash.slice(1) || sessionStorage.getItem("lanlens-admin") || "";
-if (location.hash) {
-  sessionStorage.setItem("lanlens-admin", key);
+const dock = new URLSearchParams(location.search).has("dock");
+const launchKey = location.hash.slice(1);
+const storageKey = dock ? "lanlens-admin" : "lanlens-browser";
+function stored(value) {
+  try {
+    const storage = dock ? sessionStorage : localStorage;
+    if (value === undefined) return storage.getItem(storageKey) || "";
+    if (value) storage.setItem(storageKey, value);
+    else storage.removeItem(storageKey);
+  } catch {
+    // Access for this page still works if the browser blocks persistent storage.
+    return "";
+  }
+}
+let key = launchKey || stored();
+if (launchKey) {
+  if (dock) stored(launchKey);
   history.replaceState(null, "", location.pathname + location.search);
 }
 let current = [];
@@ -17,7 +31,10 @@ async function api(action, fields = {}) {
     headers: {"Content-Type": "application/json", Authorization: "Bearer " + key},
     body: JSON.stringify({action, ...fields})
   });
-  if (response.status === 404) throw Error("Open the dashboard from OBS → Tools → LAN Lens.");
+  if (response.status === 401 || response.status === 404) {
+    showAccessPrompt();
+    throw Object.assign(Error("Dashboard access is required."), {auth: true});
+  }
   const data = await response.json();
   if (!response.ok) throw Error(data.error);
   return data;
@@ -32,7 +49,7 @@ function button(label, onclick, className = "") {
   const el = document.createElement("button");
   el.textContent = label;
   el.className = className;
-  el.onclick = () => Promise.resolve().then(onclick).catch(err => notice(err.message, true));
+  el.onclick = () => Promise.resolve().then(onclick).catch(err => { if (!err.auth) notice(err.message, true); });
   return el;
 }
 
@@ -146,6 +163,7 @@ $("save-edit").onclick = async () => {
     await mutate(editing ? "rename" : "create", {id: editing, label: $("name").value});
     $("edit").close();
   } catch (err) {
+    if (err.auth) return;
     $("name").setCustomValidity(err.message);
     $("name").reportValidity();
   }
@@ -164,7 +182,7 @@ $("copy").onclick = async () => {
   }
 };
 $("pair").onclose = () => { $("copy").textContent = "Copy pairing link"; };
-$("address").onchange = () => mutate("address", {address: $("address").value}).catch(err => notice(err.message, true));
+$("address").onchange = () => mutate("address", {address: $("address").value}).catch(err => { if (!err.auth) notice(err.message, true); });
 for (const action of ["import", "export"]) {
   $(action).onclick = async () => {
     if (action === "import" && !confirm("Replace current LAN Lens settings and close active camera sessions?")) return;
@@ -175,11 +193,11 @@ for (const action of ["import", "export"]) {
       if (result.cancelled) notice("File selection cancelled.");
       else if (action === "export") notice((result.revealed ? "Exported and opened in the file manager. " : "Exported to ") + result.path);
       else { notice("Imported " + result.path); await refresh(); }
-    } catch (err) { notice(err.message, true); }
+    } catch (err) { if (!err.auth) notice(err.message, true); }
     finally { $(action).disabled = false; }
   };
 }
-if (new URLSearchParams(location.search).has("dock")) {
+if (dock) {
   $("certificate").onclick = async event => {
     event.preventDefault();
     notice("Choose where to save the trust certificate.");
@@ -187,11 +205,53 @@ if (new URLSearchParams(location.search).has("dock")) {
       const result = await api("certificate");
       if (result.cancelled) notice("File selection cancelled.");
       else notice("Trust certificate saved to " + result.path);
-    } catch (err) { notice(err.message, true); }
+    } catch (err) { if (!err.auth) notice(err.message, true); }
   };
 }
+function showAccessPrompt() {
+  key = "";
+  stored("");
+  $("dashboard-controls").hidden = true;
+  if ($("pair").open) $("pair").close();
+  if ($("edit").open) $("edit").close();
+  $("browser-access").hidden = dock;
+  notice(dock ? "Dashboard access expired. Reopen LAN Lens in OBS." : "", dock);
+}
+
 async function monitor() {
-  try { await refresh(); } catch (err) { notice(err.message, true); }
+  try {
+    await refresh();
+    if ($("dashboard-controls").hidden) {
+      $("browser-access").hidden = true;
+      $("dashboard-controls").hidden = false;
+      notice("");
+    }
+  } catch (err) {
+    if (err.auth) return;
+    notice("Could not reach LAN Lens. Keep OBS open and try again.", true);
+  }
   setTimeout(monitor, 1800);
 }
-monitor();
+
+async function connect() {
+  if (!dock && launchKey) {
+    try {
+      const response = await fetch("/api/browser-access", {
+        method: "POST",
+        headers: {Authorization: "Bearer " + launchKey}
+      });
+      if (response.ok) {
+        const {credential} = await response.json();
+        key = credential;
+        stored(credential);
+      } else {
+        key = stored();
+      }
+    } catch {
+      key = stored() || launchKey;
+    }
+  }
+  if (key) monitor();
+  else showAccessPrompt();
+}
+connect();
