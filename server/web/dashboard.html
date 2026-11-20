@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LAN Lens for OBS</title><link rel="stylesheet" href="/style.css"><script src="/dashboard.js" defer></script></head>
+<body class="dashboard"><main>
+<header><div><h1>LAN Lens for OBS</h1><p>Send a phone camera to OBS or a LAN display.</p></div><span class="network" id="network"></span></header>
+<section class="panel">
+ <div class="section-head"><h2>Camera feeds</h2><button id="add" class="primary">Add feed</button></div>
+ <div id="feeds" class="feeds"></div>
+</section>
+<section class="panel setup"><h2>Pairing and migration</h2>
+ <div class="actions"><label>Pairing address <select id="address"></select></label><a class="button" id="certificate" href="/ca" download>Download trust certificate</a></div>
+ <p>Install the trust certificate on each phone or remote display once. Then scan a feed’s QR code on the same network.</p>
+ <details><summary>Trust the certificate</summary>
+ <ul><li><strong>iPhone or iPad</strong> Open the certificate, install the downloaded profile in Settings, then enable full trust under General → About → Certificate Trust Settings.</li>
+ <li><strong>Android</strong> Open Settings and search for “Install CA certificate.” Choose the downloaded file. The exact menu varies by device.</li>
+ <li><strong>Desktop</strong> Import the certificate as a trusted root in your operating system or browser.</li></ul>
+ </details>
+ <div class="actions migration"><button id="import">Import settings…</button><button id="export">Export settings…</button></div>
+ <p class="muted">Settings include feed IDs, viewer links, rotation and camera preferences. An imported LAN address is used if available on this computer.</p>
+</section>
+<p id="notice" role="status" aria-live="polite"></p>
+<dialog id="pair"><div class="section-head"><h2 id="pair-title"></h2><button id="close">Close</button></div>
+ <img id="qr" width="280" height="280" alt="Pairing QR code"><p id="pair-expires"></p><button id="copy">Copy pairing link</button><input id="pair-link" aria-label="Pairing link" readonly hidden>
+</dialog>
+<dialog id="edit"><div class="section-head"><h2 id="edit-title"></h2></div><label>Feed name <input id="name" maxlength="70" autocomplete="off"></label><div class="actions"><button id="cancel-edit">Cancel</button><button id="save-edit" class="primary">Save</button></div></dialog>
+</main></body></html>

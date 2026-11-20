@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension">
+  <Product Id="*" Name="LAN Lens for OBS" Language="1033" Version="0.2.0"
+           Manufacturer="LAN Lens" UpgradeCode="{16C5D862-47FF-49EC-80B1-E20519DF35FC}">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of LAN Lens is already installed." Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" />
+    <Condition Message="LAN Lens requires 64-bit Windows.">Installed OR VersionNT64</Condition>
+    <Property Id="OBSROOT" Secure="yes" Value="C:\Program Files\obs-studio">
+      <RegistrySearch Id="FindObsPath" Root="HKLM" Key="SOFTWARE\OBS Studio" Type="raw" Win64="yes" />
+    </Property>
+    <Binary Id="Preflight" SourceFile="$(var.Preflight)" />
+    <CustomAction Id="CheckOBS" BinaryKey="Preflight" DllEntry="CheckOBS" Execute="immediate" Return="check" />
+    <InstallUISequence>
+      <Custom Action="CheckOBS" After="LaunchConditions">1</Custom>
+    </InstallUISequence>
+    <InstallExecuteSequence>
+      <Custom Action="CheckOBS" Before="InstallValidate">1</Custom>
+    </InstallExecuteSequence>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="ObsDataFolder" Name="obs-studio">
+          <Directory Id="ObsPluginsFolder" Name="plugins">
+            <Directory Id="INSTALLFOLDER" Name="lan-lens">
+              <Component Id="NativePlugin" Guid="{87E05412-B60D-43B6-A485-B140FFE17513}" Win64="yes">
+                <File Id="NativeBinary" Source="$(var.Stage)\lan-lens.dll" KeyPath="yes" />
+              </Component>
+              <Directory Id="PluginDataFolder" Name="data">
+                <Component Id="Licenses" Guid="{92B45CD0-C776-4290-8FA2-B91754A5BC1C}" Win64="yes">
+                  <File Id="Copying" Source="$(var.Copying)" Name="COPYING.txt" KeyPath="yes" />
+                  <File Id="DependencyLicenses" Source="$(var.Notices)" Name="THIRD-PARTY-NOTICES.txt" />
+                </Component>
+                <Component Id="Companion" Guid="{6B607500-E69E-4ECB-AB55-1F612283B2B5}" Win64="yes">
+                  <File Id="CompanionBinary" Source="$(var.Stage)\data\lanlens-server.exe" KeyPath="yes">
+                    <fire:FirewallException Id="LanLensPrivate" Name="LAN Lens camera pairing"
+                        Description="Allow LAN Lens camera pairing over HTTPS on the private local subnet"
+                        Port="48641" Protocol="tcp" Profile="private" Scope="localSubnet" IgnoreFailure="yes" />
+                  </File>
+                </Component>
+              </Directory>
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="LANLens" Title="LAN Lens for OBS" Level="1">
+      <ComponentRef Id="NativePlugin" />
+      <ComponentRef Id="Companion" />
+      <ComponentRef Id="Licenses" />
+    </Feature>
+    <UIRef Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+  </Product>
+</Wix>
+
+

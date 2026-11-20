@@ -1,0 +1,32 @@
+# Build and packaging output
+/build/
+/dist/
+/out/
+/outputs/
+*.dll
+*.exe
+*.dylib
+*.plugin/
+*.pdb
+*.test
+*.wixobj
+*.wixpdb
+*.msi
+
+# Local settings, credentials, and diagnostics
+/lan-lens-backups/
+LAN-Lens-settings*.json
+LAN-Lens-Local-CA.cer
+local-identity.pem
+dashboard-token
+.lan-lens-*
+.env
+.env.*
+!.env.example
+*.log
+
+# Editor and operating system files
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
