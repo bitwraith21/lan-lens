@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension">
-  <Product Id="*" Name="LAN Lens for OBS" Language="1033" Version="0.2.1"
-           Manufacturer="LAN Lens" UpgradeCode="{16C5D862-47FF-49EC-80B1-E20519DF35FC}">
+  <Product Id="*" Name="LAN Lens for OBS" Language="1033" Version="0.2.17"
+           Manufacturer="bitwraith21" UpgradeCode="{16C5D862-47FF-49EC-80B1-E20519DF35FC}">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of LAN Lens is already installed." Schedule="afterInstallInitialize" />
     <MediaTemplate EmbedCab="yes" />
@@ -36,6 +36,9 @@
                     <fire:FirewallException Id="LanLensPrivate" Name="LAN Lens camera pairing"
                         Description="Allow LAN Lens camera pairing over HTTPS on the private local subnet"
                         Port="48641" Protocol="tcp" Profile="private" Scope="localSubnet" IgnoreFailure="yes" />
+                    <fire:FirewallException Id="LanLensTrust" Name="LAN Lens phone certificate download"
+                        Description="Allow phones on the private local subnet to download the LAN Lens CA"
+                        Port="48642" Protocol="tcp" Profile="private" Scope="localSubnet" IgnoreFailure="yes" />
                   </File>
                 </Component>
               </Directory>

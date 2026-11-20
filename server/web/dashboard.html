@@ -1,33 +1,82 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LAN Lens for OBS</title><link rel="stylesheet" href="/style.css"><script src="/dashboard.js" defer></script></head>
+<html lang="en" class="dashboard-page"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LAN Lens for OBS</title><link rel="stylesheet" href="/style.css">
+<script src="/ui.js" defer></script><script src="/dashboard.js" defer></script></head>
 <body class="dashboard"><main>
-<header><div><h1>LAN Lens for OBS</h1><p>Send a phone camera to OBS or a LAN display.</p></div><span class="network" id="network"></span></header>
 <section class="panel" id="browser-access" hidden>
- <h2>Connect this browser once</h2>
- <p>In OBS, open <strong>Docks → LAN Lens for OBS</strong> and click <strong>Open in Browser</strong>.</p>
+ <h1>Connect this browser</h1>
+ <p>In OBS, open <strong>Docks → LAN Lens for OBS</strong>, then choose <strong>Settings → Open in Browser</strong>.</p>
  <p>You can return to this address in the same browser profile while OBS is open.</p>
 </section>
 <div id="dashboard-controls" hidden>
-<section class="panel">
- <div class="section-head"><h2>Camera feeds</h2><button id="add" class="primary">Add feed</button></div>
+ <header class="dashboard-header"><div><h1>Camera feeds</h1><p class="network" id="network"></p></div>
+  <div class="actions">
+   <button id="identify-all" data-icon="identify" data-label>Identify all</button>
+   <button id="settings" data-icon="settings" data-label>Settings</button>
+   <button id="add" class="primary" data-icon="add" data-label>Add feed</button>
+  </div>
+ </header>
  <div id="feeds" class="feeds"></div>
-</section>
-<section class="panel setup"><h2>Pairing and migration</h2>
- <div class="actions"><label>Pairing address <select id="address"></select></label><a class="button" id="certificate" href="/ca" download>Download trust certificate</a></div>
- <p>Install the trust certificate on each phone or remote display once. Then scan a feed’s QR code on the same network.</p>
- <details><summary>Trust the certificate</summary>
- <ul><li><strong>iPhone or iPad</strong> Open the certificate, install the downloaded profile in Settings, then enable full trust under General → About → Certificate Trust Settings.</li>
- <li><strong>Android</strong> Open Settings and search for “Install CA certificate.” Choose the downloaded file. The exact menu varies by device.</li>
- <li><strong>Desktop</strong> Import the certificate as a trusted root in your operating system or browser.</li></ul>
- </details>
- <div class="actions migration"><button id="import">Import settings…</button><button id="export">Export settings…</button></div>
- <p class="muted">Settings include feed IDs, viewer links, rotation and camera preferences. An imported LAN address is used if available on this computer.</p>
-</section>
+ <div id="support-reminder" role="group" aria-label="Support LAN Lens" hidden>
+  <button type="button" id="open-kofi">Buy me a coffee</button>
+  <button type="button" id="dismiss-support" data-icon="close">Dismiss coffee reminder</button>
+ </div>
 </div>
 <p id="notice" role="status" aria-live="polite">Connecting to LAN Lens…</p>
-<dialog id="pair"><div class="section-head"><h2 id="pair-title"></h2><button id="close">Close</button></div>
- <img id="qr" width="280" height="280" alt="Pairing QR code"><p id="pair-expires"></p><button id="copy">Copy pairing link</button><input id="pair-link" aria-label="Pairing link" readonly hidden>
+<dialog id="pair" class="dialog pair-dialog" aria-labelledby="pair-title">
+ <div class="section-head"><h2 id="pair-title"></h2><button id="close" data-icon="close">Close pairing</button></div>
+ <img id="qr" width="280" height="280" alt="Pairing QR code">
+ <p id="pair-scan-hint" hidden>In the LAN Lens phone app, tap Scan pairing QR.</p>
+ <label class="field">Type this link on the other device
+  <input id="pair-link" aria-label="Pairing link" readonly spellcheck="false">
+ </label>
+ <p id="pair-code"></p><p id="pair-expires"></p>
+ <div class="actions"><button id="copy">Copy pairing link</button><button id="pair-trust" hidden>Get certificate on phone</button></div>
 </dialog>
-<dialog id="edit"><div class="section-head"><h2 id="edit-title"></h2></div><label>Feed name <input id="name" maxlength="70" autocomplete="off"></label><div class="actions"><button id="cancel-edit">Cancel</button><button id="save-edit" class="primary">Save</button></div></dialog>
+<dialog id="bind" class="dialog" aria-labelledby="bind-title">
+ <form id="bind-form">
+  <h2 id="bind-title">Link an existing OBS source</h2>
+  <label class="field">Vacant Browser Source <select id="bind-source" required></select></label>
+  <p id="bind-scenes"></p>
+  <p id="bind-error" role="status" class="dialog-error" hidden></p>
+  <div class="dialog-actions"><button type="button" id="cancel-bind">Cancel</button><button type="submit" id="save-bind" class="primary">Link source</button></div>
+ </form>
+</dialog>
+<dialog id="edit" class="dialog" aria-labelledby="edit-title">
+ <form id="feed-form">
+  <h2 id="edit-title"></h2>
+  <label class="field">Feed name <input id="name" maxlength="70" autocomplete="off" required autofocus></label>
+  <p id="edit-error" role="status" class="dialog-error" hidden></p>
+  <div class="dialog-actions"><button type="button" id="cancel-edit">Cancel</button><button type="submit" id="save-edit" class="primary">Save</button></div>
+ </form>
+</dialog>
+<dialog id="setup" class="dialog setup" aria-labelledby="setup-title">
+ <div class="section-head"><h2 id="setup-title">Pairing and settings</h2><button id="close-settings" data-icon="close">Close settings</button></div>
+ <button type="button" id="open-browser" hidden>Open in Browser</button>
+ <label class="field">Pairing address <select id="address"></select></label>
+ <a class="button" id="certificate" href="/ca" download>Download trust certificate</a>
+ <details id="trust"><summary>Phone certificate download</summary>
+ <p id="trust-status"></p>
+ <div id="trust-phone" hidden>
+  <img id="trust-qr" width="172" height="172" alt="QR code for the phone certificate download">
+  <a id="trust-url" target="_blank" rel="noopener noreferrer"></a>
+  <p>Compare this SHA-256 fingerprint with the one on the phone</p>
+  <code id="trust-fingerprint"></code>
+ </div>
+ <ul><li><strong>iPhone or iPad</strong> Install the downloaded profile in Settings. Enable full trust in General → About → Certificate Trust Settings.</li>
+ <li><strong>Android</strong> Search Settings for “Install CA certificate” and choose the downloaded file.</li>
+ <li><strong>Desktop</strong> Import it as a trusted root in your operating system or browser.</li></ul>
+ </details>
+ <details id="https-config"><summary>Custom HTTPS certificate</summary>
+  <p id="https-current"></p>
+  <p>Use a hostname that resolves to this computer on your LAN and a certificate chain the phones already trust.</p>
+  <form id="https-form">
+   <label class="field">DNS hostname <input id="https-host" placeholder="camera.example.com" autocomplete="off" required></label>
+   <label class="field">PEM certificate chain path <input id="https-cert" autocomplete="off" required></label>
+   <label class="field">PEM private key path <input id="https-key" autocomplete="off" required></label>
+   <div class="dialog-actions"><button id="https-reset" type="button">Use local certificate</button><button class="primary" type="submit">Apply HTTPS</button></div>
+  </form>
+ </details>
+ <div class="actions migration"><button id="import">Import settings…</button><button id="export">Export settings…</button></div>
+</dialog>
 </main></body></html>

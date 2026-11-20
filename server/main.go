@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
@@ -10,13 +11,16 @@ import (
 	"github.com/skip2/go-qrcode"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,16 +40,26 @@ type invitation struct {
 type grant struct{ invitation }
 
 type message struct {
-	Kind  string `json:"kind"`
-	Peer  string `json:"peer,omitempty"`
-	Value string `json:"value,omitempty"`
+	Kind    string `json:"kind"`
+	Peer    string `json:"peer,omitempty"`
+	Value   string `json:"value,omitempty"`
+	Request string `json:"request,omitempty"`
 }
 type client struct {
-	slotID, role, grant string
-	seen                time.Time
-	queue               []message
+	slotID, role, grant     string
+	mic                     microphoneStatus
+	liveMic                 bool
+	connection              uint64
+	seen                    time.Time
+	queue                   []message
+	frameWidth, frameHeight int
 }
 type app struct {
+	trustAvailable             bool
+	customHTTPS                atomic.Pointer[hostTLS]
+	lastSnapshot               time.Time
+	pairingFailures            map[string]attemptWindow
+	allPairingFailures         attemptWindow
 	mu                         sync.Mutex
 	dialog                     sync.Mutex
 	cfg                        settings
@@ -55,6 +69,9 @@ type app struct {
 	invitations                map[string]invitation
 	grants                     map[string]grant
 	clients                    map[string]*client
+	phoneCommands              map[string]*phoneCommand
+	nextCameraConnection       uint64
+	revokedCameras             map[string]revokedCamera
 }
 
 func main() {
@@ -104,7 +121,15 @@ func run(dir string) error {
 		return fmt.Errorf("pairing server: %w", err)
 	}
 	defer lan.Close()
-	tlsConfig, err := serverTLS(a.authority)
+	trust, trustErr := net.Listen("tcp4", "0.0.0.0:"+trustPort)
+	if trustErr == nil {
+		defer trust.Close()
+		a.trustAvailable = true
+	} else {
+		log.Print("Phone certificate download unavailable: ", trustErr)
+	}
+	a.loadCustomHTTPS()
+	tlsConfig, err := serverTLS(a.authority, a.customHTTPS.Load)
 	if err != nil {
 		return err
 	}
@@ -117,12 +142,18 @@ func run(dir string) error {
 		return err
 	}
 	defer os.Remove(tokenPath)
+	os.Remove(filepath.Join(dir, "obs-bindings.json"))
 	stopped := make(chan error, 3)
 	go func() { io.Copy(io.Discard, os.Stdin); stopped <- nil }()
 	go func() { stopped <- server(true).Serve(local) }()
 	public := server(false)
 	public.TLSConfig = tlsConfig
 	go func() { stopped <- public.ServeTLS(lan, "", "") }()
+	if trust != nil {
+		server := &http.Server{Handler: http.HandlerFunc(a.trustHandler), ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, MaxHeaderBytes: 12 << 10}
+		go func() { _ = server.Serve(trust) }()
+	}
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		for range ticker.C {
@@ -185,14 +216,15 @@ func (a *app) handler(local bool) http.Handler {
 			}
 		case "/ca":
 			if local && r.Method == "GET" {
-				w.Header().Set("Content-Type", "application/x-x509-ca-cert")
-				w.Header().Set("Content-Disposition", `attachment; filename="LAN-Lens-Local-CA.cer"`)
-				w.Write(a.authority.root.Raw)
+				a.downloadCertificate(w)
 				return
 			}
 		default:
 			if r.Method == "GET" {
-				file := map[string]string{"/camera": "camera.html", "/view": "view.html", "/style.css": "style.css", "/client.js": "client.js"}
+				file := map[string]string{"/camera": "camera.html", "/c": "camera.html", "/view": "view.html", "/v": "view.html", "/style.css": "style.css", "/client.js": "client.js", "/ui.js": "ui.js", "/optics.js": "optics.js",
+					"/camera.webmanifest": "camera.webmanifest", "/camera-sw.js": "camera-sw.js",
+					"/qr-scanner.js": "qr-scanner.js", "/qr-worker.js": "qr-worker.js", "/qr-decoder.js": "qr-decoder.js",
+					"/camera-stats.js": "camera-stats.js", "/camera-192.png": "camera-192.png", "/camera-512.png": "camera-512.png"}
 				if local {
 					file["/"] = "dashboard.html"
 					file["/dashboard.js"] = "dashboard.js"
@@ -203,7 +235,10 @@ func (a *app) handler(local bool) http.Handler {
 						http.NotFound(w, r)
 						return
 					}
-					http.ServeContent(w, r, name, time.Time{}, strings.NewReader(string(data)))
+					if name == "camera.webmanifest" {
+						w.Header().Set("Content-Type", "application/manifest+json")
+					}
+					http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
 					return
 				}
 			}
@@ -217,8 +252,13 @@ func (a *app) hostOK(local bool, host string) bool {
 		return host == localAddr
 	}
 	address, port, err := net.SplitHostPort(host)
-	return err == nil && port == lanPort && (address == "127.0.0.1" || address == "localhost" ||
-		(validIP(address) && slices.Contains(addresses(), address)))
+	if err != nil || port != lanPort {
+		return false
+	}
+	if custom := a.customHTTPS.Load(); custom != nil && address == custom.settings.Hostname {
+		return true
+	}
+	return address == "127.0.0.1" || address == "localhost" || (validIP(address) && slices.Contains(addresses(), address))
 }
 
 func auth(r *http.Request) string {
@@ -257,7 +297,17 @@ func (a *app) index(id string) int {
 	return slices.IndexFunc(a.cfg.Slots, func(s slot) bool { return s.ID == id })
 }
 
+func httpsHostname(custom *hostTLS) string {
+	if custom != nil {
+		return custom.settings.Hostname
+	}
+	return ""
+}
+
 func (a *app) lanAddress() string {
+	if custom := a.customHTTPS.Load(); custom != nil {
+		return custom.settings.Hostname
+	}
 	if slices.Contains(a.addresses, a.cfg.LANAddress) || a.cfg.LANAddress == "127.0.0.1" {
 		return a.cfg.LANAddress
 	}
@@ -279,9 +329,47 @@ func (a *app) save(cfg settings) error {
 func (a *app) manage(w http.ResponseWriter, r *http.Request) {
 	var q struct {
 		Action, ID, Label, Address, Role, Command string
-		Rotation                                  int
+		Rotation, Resolution                      int
+		Source, Section, Request                  string
+		Muted                                     bool
+		Connection                                uint64
+		Open                                      bool
+		HTTPS                                     *hostTLSSettings
 	}
 	if !decode(w, r, &q) {
+		return
+	}
+	if q.Action == "phone-result" {
+		a.phoneCommandResult(w, r, q.Request)
+		return
+	}
+	if q.Action == "open-browser" || q.Action == "open-kofi" {
+		if !same(auth(r), a.admin) {
+			fail(w, 403, "Open the system browser from the OBS dock.")
+			return
+		}
+		if q.Action == "open-kofi" {
+			fmt.Println("OPEN_KOFI")
+		} else {
+			fmt.Println("OPEN_BROWSER")
+		}
+		reply(w, map[string]bool{"ok": true})
+		return
+	}
+	if q.Action == "customHTTPS" {
+		a.applyCustomHTTPS(w, q.HTTPS)
+		return
+	}
+	if q.Action == "addToOBS" || q.Action == "bindSource" {
+		source := ""
+		if q.Action == "bindSource" {
+			if !uuidPattern.MatchString(q.Source) {
+				fail(w, 400, "Choose an OBS Browser Source.")
+				return
+			}
+			source = q.Source
+		}
+		a.addToOBS(w, r, q.ID, source)
 		return
 	}
 	if q.Action == "import" || q.Action == "export" || q.Action == "certificate" {
@@ -295,29 +383,70 @@ func (a *app) manage(w http.ResponseWriter, r *http.Request) {
 	idx := a.index(q.ID)
 	cfg := a.cfg
 	cfg.Slots = slices.Clone(cfg.Slots)
+	var deleted slot
 	switch q.Action {
+	case "identify-all":
+		queued := 0
+		for _, c := range a.clients {
+			if c.role == "view" && a.send(c, message{Kind: "identify"}) {
+				queued++
+			}
+		}
+		if queued == 0 {
+			fail(w, 409, "No connected displays to identify.")
+			return
+		}
+		reply(w, map[string]int{"queued": queued})
+		return
 	case "state":
 		type feed struct {
 			slot
-			Online bool `json:"online"`
-			Views  int  `json:"views"`
+			Mic        *liveMicrophoneStatus `json:"mic,omitempty"`
+			Microphone bool                  `json:"microphone"`
+			Online     bool                  `json:"online"`
+			Views      int                   `json:"views"`
+			Received   []string              `json:"received,omitempty"`
+			Sources    []obsBinding          `json:"sources,omitempty"`
 		}
 		feeds := []feed{}
+		bindings, vacant := a.obsSources()
 		for _, s := range cfg.Slots {
-			f := feed{slot: s}
+			f := feed{slot: s, Sources: bindings[s.ID]}
 			for _, c := range a.clients {
 				if c.slotID == s.ID {
 					if c.role == "camera" {
 						f.Online = true
+						f.Microphone = c.mic.Available
+						f.Mic = &liveMicrophoneStatus{microphoneStatus: c.mic, Connection: c.connection}
 					} else {
 						f.Views++
+						if c.frameWidth > 0 && c.frameHeight > 0 {
+							size := fmt.Sprintf("%d×%d", c.frameWidth, c.frameHeight)
+							if !slices.Contains(f.Received, size) {
+								f.Received = append(f.Received, size)
+							}
+						}
 					}
 				}
 			}
+			slices.Sort(f.Received)
 			feeds = append(feeds, f)
 		}
-		reply(w, map[string]any{"feeds": feeds, "addresses": a.addresses, "address": a.lanAddress(), "preferredAddress": cfg.LANAddress})
+		reply(w, map[string]any{"feeds": feeds, "addresses": a.addresses, "address": a.lanAddress(), "preferredAddress": cfg.LANAddress, "accordions": cfg.Accordions, "vacantSources": vacant, "customHTTPS": httpsHostname(a.customHTTPS.Load()), "trustURL": a.trustURL()})
 		return
+	case "trust-page":
+		a.phoneTrustQR(w)
+		return
+	case "accordion":
+		if !accordionKey(q.Section, q.ID) || (q.ID != "" && idx < 0) {
+			fail(w, 400, "Unknown dashboard section")
+			return
+		}
+		cfg.Accordions = maps.Clone(cfg.Accordions)
+		if cfg.Accordions == nil {
+			cfg.Accordions = make(map[string]bool)
+		}
+		cfg.Accordions[q.Section+":"+q.ID] = q.Open
 	case "address":
 		if q.Address != "" && q.Address != "127.0.0.1" && !slices.Contains(a.addresses, q.Address) {
 			fail(w, 400, "Choose a local IPv4 address")
@@ -350,6 +479,11 @@ func (a *app) manage(w http.ResponseWriter, r *http.Request) {
 		s := cfg.Slots[idx]
 		switch q.Action {
 		case "delete":
+			deleted = s
+			cfg.Accordions = maps.Clone(cfg.Accordions)
+			for _, section := range []string{"setup", "sources", "controls", "resolution"} {
+				delete(cfg.Accordions, section+":"+s.ID)
+			}
 			cfg.Slots = slices.Delete(cfg.Slots, idx, idx+1)
 		case "rotate":
 			if q.Rotation != 90 && q.Rotation != -90 {
@@ -357,22 +491,35 @@ func (a *app) manage(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			cfg.Slots[idx].Rotation = (s.Rotation + q.Rotation + 360) % 360
-		case "addToOBS":
-			fmt.Printf("ADD %s %s\n", s.ID, s.ViewerKey)
-			reply(w, map[string]bool{"ok": true})
+		case "setResolution":
+			if !validResolution(q.Resolution) {
+				fail(w, 400, "Choose Auto, 360p, 540p, 720p, or 1080p.")
+				return
+			}
+			a.queuePhoneCommand(w, s.ID, "set-resolution", strconv.Itoa(q.Resolution), 0)
+			return
+		case "set-microphone":
+			a.queuePhoneCommand(w, s.ID, "set-microphone", strconv.FormatBool(q.Muted), q.Connection)
 			return
 		case "command":
 			switch q.Command {
-			case "identify", "reload-view", "ask-reset", "reload-camera":
+			case "ask-reset", "reload-camera":
+				a.queuePhoneCommand(w, s.ID, q.Command, "", 0)
+				return
+			case "identify", "reload-view":
 			default:
 				fail(w, 400, "Invalid command")
 				return
 			}
+			queued := 0
 			for _, c := range a.clients {
-				camera := q.Command == "ask-reset" || q.Command == "reload-camera"
-				if c.slotID == s.ID && (c.role == "camera") == camera {
-					a.send(c, message{Kind: q.Command})
+				if c.slotID == s.ID && c.role == "view" && a.send(c, message{Kind: q.Command}) {
+					queued++
 				}
+			}
+			if queued == 0 {
+				fail(w, 409, "No available recipient for this command.")
+				return
 			}
 			reply(w, map[string]bool{"ok": true})
 			return
@@ -399,11 +546,18 @@ func (a *app) manage(w http.ResponseWriter, r *http.Request) {
 					fail(w, 429, "Too many recent pairing codes")
 					return
 				}
-				key = randomID(24)
+				key = shortPairingCode()
+				for a.invitations[key].slotID != "" {
+					key = shortPairingCode()
+				}
 				ticket = invitation{slotID: s.ID, role: q.Role, until: time.Now().Add(5 * time.Minute)}
 				a.invitations[key] = ticket
 			}
-			url := "https://" + net.JoinHostPort(address, lanPort) + "/" + q.Role + "#" + s.ID + "." + key
+			route := "/c"
+			if q.Role == "view" {
+				route = "/v"
+			}
+			url := "https://" + net.JoinHostPort(address, lanPort) + route + "#" + key
 			png, err := qrcode.Encode(url, qrcode.Medium, 320)
 			if err != nil {
 				fail(w, 500, "QR encoding failed")
@@ -412,7 +566,7 @@ func (a *app) manage(w http.ResponseWriter, r *http.Request) {
 			reply(w, map[string]any{"url": url, "image": png, "expiresAt": ticket.until.UnixMilli()})
 			return
 		case "disconnect":
-			a.revoke(s.ID, "camera")
+			a.revoke(s.ID, "camera", "The host unpaired this camera.")
 			reply(w, map[string]bool{"ok": true})
 			return
 		default:
@@ -425,7 +579,8 @@ func (a *app) manage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q.Action == "delete" {
-		a.revoke(q.ID, "")
+		requestUnbind(deleted)
+		a.revoke(q.ID, "", "The host deleted this feed.")
 	}
 	reply(w, map[string]bool{"ok": true})
 }
@@ -487,9 +642,15 @@ func (a *app) fileAction(w http.ResponseWriter, action string) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	previous := a.cfg.Slots
 	if err = a.save(cfg); err != nil {
 		fail(w, 500, err.Error())
 		return
+	}
+	for _, old := range previous {
+		if idx := a.index(old.ID); idx < 0 || !same(old.ViewerKey, a.cfg.Slots[idx].ViewerKey) {
+			requestUnbind(old)
+		}
 	}
 	clear(a.clients)
 	clear(a.invitations)

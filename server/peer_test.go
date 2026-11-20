@@ -44,16 +44,23 @@ func TestSharedPairingRejectsReplayAndActiveCamera(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return strings.SplitN(u.Fragment, ".", 2)[1]
+		if u.Path != "/c" || len(u.Fragment) != 6 || strings.Trim(u.Fragment, pairingAlphabet) != "" {
+			t.Fatalf("invalid short pairing link: %s", u)
+		}
+		return u.Fragment
 	}
 	enroll := func(ticket string, code int) map[string]any {
-		return post(false, "/api/session", "", map[string]string{"action": "enroll", "id": s.ID, "role": "camera", "key": ticket}, code)
+		return post(false, "/api/session", "", map[string]string{"action": "enroll", "role": "camera", "key": ticket}, code)
 	}
 	initial := pair()
 	if pair() != initial {
 		t.Fatal("a second dashboard replaced the open pairing code")
 	}
-	credential := enroll(initial, 200)["key"].(string)
+	enrolled := enroll(strings.ToLower(initial), 200)
+	if enrolled["id"] != s.ID {
+		t.Fatal("short code did not resolve the feed")
+	}
+	credential := enrolled["key"].(string)
 	joined := post(false, "/api/session", "", map[string]string{"action": "join", "id": s.ID, "role": "camera", "key": credential}, 200)
 	client := joined["client"].(string)
 	if err := enroll(initial, 401)["error"].(string); !strings.Contains(err, "already scanned") {
@@ -69,8 +76,68 @@ func TestSharedPairingRejectsReplayAndActiveCamera(t *testing.T) {
 	if err := enroll(next, 409)["error"].(string); !strings.Contains(err, "already active") {
 		t.Fatal(err)
 	}
+	post(false, "/api/session", "", map[string]string{"action": "inspect", "id": s.ID, "role": "camera", "key": credential}, 200)
 	post(false, "/api/session", client, map[string]string{"action": "poll"}, 200)
 	post(false, "/api/session", client, map[string]string{"action": "leave"}, 200)
 	enroll(next, 200)
+	for i := 0; i < 7; i++ {
+		enroll("wrong", 401)
+	}
+	enroll("wrong", 429)
 	post(false, "/api/session", "", map[string]string{"action": "join", "id": s.ID, "role": "camera", "key": credential}, 401)
+}
+
+func TestMicrophoneCommandEndsWithItsConnection(t *testing.T) {
+	const grantKey = "phone"
+	first := &client{role: "camera", slotID: "feed", grant: grantKey, connection: 1}
+	first.reportMicrophone(&microphoneStatus{Available: true, Revision: 1})
+	a := &app{clients: map[string]*client{"first": first}, grants: map[string]grant{grantKey: {}}}
+
+	w := httptest.NewRecorder()
+	a.queuePhoneCommand(w, "feed", "set-microphone", "true", first.connection)
+	if w.Code != 200 || len(first.queue) != 1 {
+		t.Fatalf("microphone command not queued: %d %s", w.Code, w.Body)
+	}
+	request := first.queue[0].Request
+	a.drop("first")
+	select {
+	case <-a.phoneCommands[request].ready:
+	default:
+		t.Fatal("disconnect left the command pending")
+	}
+	if a.phoneCommands[request].result.Success {
+		t.Fatal("disconnect marked the microphone command successful")
+	}
+
+	second := &client{role: "camera", slotID: "feed", grant: grantKey, connection: 2}
+	second.reportMicrophone(&microphoneStatus{Available: true, Revision: 1})
+	a.clients["second"] = second
+	w = httptest.NewRecorder()
+	a.acceptPhoneFeedback(w, grantKey, request, "late reply", true, &microphoneStatus{Available: true, Muted: true, Revision: 2})
+	if w.Code != 200 || a.phoneCommands[request].result.Success || second.mic.Muted {
+		t.Fatal("a reply from the old command changed the replacement session")
+	}
+	w = httptest.NewRecorder()
+	a.queuePhoneCommand(w, "feed", "set-microphone", "true", first.connection)
+	if w.Code != 409 || len(second.queue) != 0 {
+		t.Fatalf("stale command reached the replacement session: %d %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	a.queuePhoneCommand(w, "feed", "set-microphone", "true", second.connection)
+	if w.Code != 200 || len(second.queue) != 1 {
+		t.Fatalf("replacement session did not accept a command: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestMicrophoneTelemetryRejectsOlderSamples(t *testing.T) {
+	c := &client{}
+	c.reportMicrophone(&microphoneStatus{Available: true, Muted: true, Revision: 3})
+	c.reportMicrophone(&microphoneStatus{Available: true, Revision: 2})
+	if !c.mic.Muted {
+		t.Fatal("an older sample replaced the current microphone status")
+	}
+	c.reportMicrophone(&microphoneStatus{Available: true, Interrupted: true, Revision: 4})
+	if !c.mic.Interrupted || c.mic.Muted {
+		t.Fatal("the latest camera status was not applied")
+	}
 }

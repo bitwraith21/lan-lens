@@ -1,19 +1,144 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LAN Lens Camera</title><link rel="stylesheet" href="/style.css"><script src="/client.js" defer></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>LAN Lens Camera</title>
+<meta name="theme-color" content="#11151d"><meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/camera.webmanifest"><link rel="apple-touch-icon" href="/camera-192.png">
+<link rel="stylesheet" href="/style.css">
+<script src="/ui.js" defer></script><script src="/optics.js" defer></script><script src="/client.js" defer></script></head>
 <body class="camera" data-role="camera"><main>
-<header><div><h1 id="label">LAN Lens Camera</h1><p id="status" role="status">Checking pairing link…</p></div></header>
-<section class="camera-preview" id="preview">
+<section class="camera-preview" id="preview" aria-label="Camera preview">
  <video id="media" muted playsinline autoplay></video>
+ <video id="qr-preview" muted playsinline autoplay aria-label="QR scanner preview" hidden></video>
+ <div id="qr-guide" aria-hidden="true" hidden></div>
+ <header class="camera-header"><h1 id="label">LAN Lens Camera</h1><p id="status" class="camera-status" role="status">Checking pairing link…</p></header>
+ <div id="eco-screen" class="eco-screen" hidden>
+  <span class="eco-symbol" data-icon="eco" aria-hidden="true"></span>
+  <strong>Eco Mode Active</strong><span>Local preview off</span>
+ </div>
+ <div class="preview-actions" id="preview-actions" aria-label="Camera shortcuts">
+  <button id="preview-settings" type="button" data-icon="settings" aria-controls="phone-controls" aria-expanded="false" hidden>Show camera controls</button>
+  <button id="preview-fullscreen" type="button" data-icon="expand" aria-pressed="false" hidden>Enter full screen</button>
+  <button id="mic-toggle" class="mic-toggle" type="button" data-icon="mic" hidden>Mute microphone</button>
+  <button id="torch" class="torch" type="button" data-icon="torch" hidden>Turn on flashlight</button>
+ </div>
 </section>
-<section class="panel camera-controls">
- <div class="actions"><button class="primary" id="start" disabled>Start camera</button><button id="stop" disabled>Stop</button></div>
- <label>Camera <select id="camera"><option value="">Default camera</option></select></label>
- <label>Lens <select id="facing"><option value="environment">Rear</option><option value="user">Front</option></select></label>
- <label id="zoom-row" hidden>Zoom <input type="range" id="zoom" aria-describedby="zoom-tip"><output id="zoom-value" for="zoom">1.0×</output>
-   <small id="zoom-tip">Pinch on the preview to zoom.</small></label>
- <button id="torch" hidden>Turn light on</button>
- <label><input type="checkbox" id="portrait"> Portrait capture</label>
- <label><input type="checkbox" id="eco"> Hide local preview</label>
+<div id="fullscreen-toolbar" hidden></div>
+<section class="camera-controls" id="phone-controls" aria-label="Camera controls">
+ <aside id="install-offer" hidden>
+  <p>Get LAN Lens on your home screen.</p>
+  <div class="actions"><button id="install-now" class="primary" type="button">Install</button>
+  <button id="install-dismiss" type="button" data-icon="close">Dismiss install offer</button></div>
+ </aside>
+ <section id="pairing" aria-label="Pair a camera" hidden>
+  <div class="actions">
+   <button id="scan-pairing" type="button" class="primary" data-icon="qr" data-label>Scan pairing QR</button>
+   <button id="cancel-scan" type="button" hidden>Stop scan</button>
+   <button id="cancel-pairing" type="button" hidden>Back to camera</button>
+  </div>
+  <details id="pair-with-code">
+   <summary>Use a pairing code instead</summary>
+   <form id="manual-pair">
+    <label class="field">Camera pairing code
+     <input id="manual-code" placeholder="6 characters" maxlength="6" pattern="[A-Z2-9]{6}" autocapitalize="characters" autocomplete="off" spellcheck="false" required>
+    </label>
+    <button id="submit-pair-code" type="submit">Pair camera</button>
+   </form>
+  </details>
+ </section>
+ <div id="capture-controls" hidden>
+  <div class="camera-toolbar" id="camera-toolbar">
+   <button class="primary" id="start" data-icon="start" data-label disabled>Start camera</button>
+   <button id="stop" class="danger-solid" data-icon="stop" data-label hidden>Stop camera</button>
+   <button id="eco" data-icon="eco" aria-pressed="false" disabled>Enable Eco Mode</button>
+   <button id="cycle-aspect" data-icon="aspect" disabled>Change aspect</button>
+  </div>
+  <details id="zoom-panel" class="camera-group" open>
+   <summary>Zoom <output id="zoom-value" for="zoom" aria-live="off">1.00×</output></summary>
+   <div class="camera-group-content">
+    <input class="touch-slider" type="range" id="zoom" min="1" max="4" step="0.01" value="1"
+     aria-label="Camera zoom" title="Pinch the preview or use this slider" disabled>
+   </div>
+  </details>
+  <details id="lens-panel" class="camera-group">
+   <summary>Lens and aspect</summary>
+   <div class="camera-group-content">
+    <div class="field">
+     <label for="camera">Lens</label>
+     <div class="lens-controls">
+      <select id="camera" disabled>
+       <option value="rear">Rear (automatic)</option>
+       <option value="front">Front (automatic)</option>
+      </select>
+      <button type="button" id="switch-lens" data-icon="flip" disabled>Switch to front camera</button>
+     </div>
+    </div>
+    <div class="field"><span id="aspect-label">Aspect</span>
+     <div class="button-group" role="group" aria-labelledby="aspect-label">
+      <button id="portrait" data-icon="portrait" aria-pressed="true" disabled>Portrait</button>
+      <button id="landscape-crop" data-icon="crop" aria-pressed="false" disabled>Landscape cropped</button>
+      <button id="landscape" data-icon="landscape" aria-pressed="false" disabled>Landscape</button>
+     </div>
+    <small id="aspect-mode">Portrait</small>
+    </div>
+   </div>
+  </details>
+  <p id="quality-warning" role="status" hidden></p>
+  <details id="resolution-panel" class="camera-group">
+   <summary>Resolution</summary>
+   <div class="camera-group-content">
+    <label class="field quality-field">Stream quality
+     <select id="resolution" disabled>
+      <option value="0">Auto</option><option value="360">360p</option>
+      <option value="540">540p</option><option value="720">720p</option><option value="1080">1080p</option>
+     </select>
+     <output id="actual-resolution" for="resolution"></output>
+    </label>
+    <button id="reset" data-icon="reload" data-label disabled>Restart camera</button>
+   </div>
+  </details>
+  <details id="optics" class="camera-optics camera-group" hidden><summary>Focus &amp; exposure</summary>
+   <div class="camera-options">
+    <label class="field" hidden>Focus mode <select id="focus-mode"></select></label>
+    <label class="field" hidden>Exposure mode <select id="exposure-mode"></select></label>
+   </div>
+   <label class="field" hidden>Focus distance <input type="range" id="focus-value"><span class="range-ends"><span>Near</span><span>Far</span></span></label>
+   <label class="field" hidden>Shutter time <input type="range" id="exposure-value"></label>
+   <label class="field" hidden>Exposure compensation <input type="range" id="ev-value"></label>
+   <p id="optic-hint"></p>
+  </details>
+  <details id="camera-stats" class="camera-optics camera-group"><summary>Camera statistics</summary>
+   <dl class="stats-readout">
+    <div><dt>Camera FPS</dt><dd id="stat-capture">—</dd></div>
+    <div><dt>Send FPS</dt><dd id="stat-fps">—</dd></div>
+    <div><dt>Sent resolution</dt><dd id="stat-size">—</dd></div>
+    <div><dt>Total video bitrate</dt><dd id="stat-bitrate">—</dd></div>
+    <div><dt>Encoder limit</dt><dd id="stat-limit">—</dd></div>
+    <div><dt>Encode time per frame</dt><dd id="stat-encode">—</dd></div>
+    <div><dt>Worst round trip</dt><dd id="stat-rtt">—</dd></div>
+    <div><dt>Highest packet loss</dt><dd id="stat-loss">—</dd></div>
+   </dl>
+  </details>
+  <details id="fullscreen-panel" class="camera-group">
+   <summary>Full-screen settings</summary>
+   <div class="camera-group-content">
+    <label class="field opacity-field">Control opacity
+     <output id="opacity-value" for="controls-opacity" aria-live="off">95%</output>
+     <input class="touch-slider" type="range" id="controls-opacity" min="50" max="100" step="1" value="95">
+    </label>
+   </div>
+  </details>
+ </div>
+ <div class="actions">
+  <button type="button" id="pair-another" hidden>Pair another feed</button>
+  <button type="button" id="install-camera" hidden>Install app</button>
+ </div>
 </section>
-</main></body></html>
+</main>
+<dialog id="install-help" class="dialog" aria-labelledby="install-title">
+ <h2 id="install-title">Install LAN Lens Camera</h2>
+ <p id="install-status"></p>
+ <p><strong>iPhone:</strong> In Safari, tap Share → Add to Home Screen → Open as Web App, then Add.</p>
+ <p><strong>Android:</strong> In Chrome, open ⋮ and choose Install and create shortcut → Install. Some versions call it Install app or Add to Home screen.</p>
+ <form method="dialog" class="dialog-actions"><button>Done</button></form>
+</dialog>
+</body></html>

@@ -40,33 +40,143 @@ static bool token_ok(const char *s, size_t len)
 	return true;
 }
 
-static void add_source(const char *id, const char *key)
+static void feed_url(char *url, size_t size, const char *id, const char *key)
+{
+	snprintf(url, size, LOCAL_URL "/view#%s.%s", id, key);
+}
+
+static bool source_matches(obs_source_t *source, const char *url)
+{
+	if (strcmp(obs_source_get_id(source), "browser_source") != 0)
+		return false;
+	obs_data_t *settings = obs_source_get_settings(source);
+	bool matches = !obs_data_get_bool(settings, "is_local_file") &&
+		       !strcmp(obs_data_get_string(settings, "url"), url);
+	obs_data_release(settings);
+	return matches;
+}
+
+struct scene_search {
+	const char *url;
+	obs_source_t *source;
+	DARRAY(obs_scene_t *) visited;
+	bool found;
+};
+
+static void search_scene(obs_scene_t *scene, struct scene_search *search);
+
+static bool search_item(obs_scene_t *scene, obs_sceneitem_t *item, void *data)
+{
+	(void)scene;
+	struct scene_search *search = data;
+	obs_source_t *source = obs_sceneitem_get_source(item);
+	search->found = search->source ? source == search->source : source_matches(source, search->url);
+	if (!search->found) {
+		obs_scene_t *nested = obs_sceneitem_is_group(item) ? obs_sceneitem_group_get_scene(item)
+								  : obs_scene_from_source(source);
+		search_scene(nested, search);
+	}
+	return !search->found;
+}
+
+static void search_scene(obs_scene_t *scene, struct scene_search *search)
+{
+	if (!scene || da_find(search->visited, &scene, 0) != DARRAY_INVALID)
+		return;
+	da_push_back(search->visited, &scene);
+	obs_scene_enum_items(scene, search_item, search);
+}
+
+static bool scene_has(obs_scene_t *scene, obs_source_t *source, const char *url)
+{
+	struct scene_search search = {.source = source, .url = url};
+	search_scene(scene, &search);
+	da_free(search.visited);
+	return search.found;
+}
+
+struct source_search {
+	const char *url;
+	obs_source_t *source;
+};
+
+static bool find_bound_source(void *data, obs_source_t *source)
+{
+	struct source_search *search = data;
+	if (!source_matches(source, search->url))
+		return true;
+	search->source = obs_source_get_ref(source);
+	return search->source == NULL;
+}
+
+static bool vacant_source(obs_data_t *settings)
+{
+ return !obs_data_get_bool(settings, "is_local_file") &&
+        !strcmp(obs_data_get_string(settings, "url"), "about:blank");
+}
+
+static const char *bind_source(const char *id, const char *key, const char *uuid)
+{
+ obs_source_t *source = obs_get_source_by_uuid(uuid);
+ if (!source)
+  return "occupied";
+ const char *result = "occupied";
+ if (!strcmp(obs_source_get_id(source), "browser_source")) {
+  char url[128];
+  feed_url(url, sizeof(url), id, key);
+  obs_data_t *settings = obs_source_get_settings(source);
+  if (source_matches(source, url)) {
+   result = "bound";
+  } else if (vacant_source(settings)) {
+   struct source_search search = {.url = url};
+   obs_enum_sources(find_bound_source, &search);
+   if (search.source) {
+    result = "feed-bound";
+    obs_source_release(search.source);
+   } else {
+    obs_data_set_string(settings, "url", url);
+    obs_source_update(source, settings);
+    result = "bound";
+   }
+  }
+  obs_data_release(settings);
+ }
+ obs_source_release(source);
+ return result;
+}
+
+static const char *add_source(const char *id, const char *key)
 {
 	char url[128];
-	char name[100];
-	snprintf(url, sizeof(url), LOCAL_URL "/view#%s.%s", id, key);
-	snprintf(name, sizeof(name), "LAN Lens · %.12s", id);
-
-	obs_source_t *selected = obs_frontend_get_current_scene();
+	feed_url(url, sizeof(url), id, key);
+	obs_source_t *selected = obs_frontend_preview_program_mode_active()
+					 ? obs_frontend_get_current_preview_scene()
+					 : obs_frontend_get_current_scene();
 	obs_scene_t *scene = selected ? obs_scene_from_source(selected) : NULL;
 	if (!scene) {
-		blog(LOG_WARNING, "[LAN Lens] Select a scene before adding a feed.");
 		obs_source_release(selected);
-		return;
+		return "no-scene";
 	}
-	obs_source_t *source = obs_get_source_by_name(name);
-	if (source) {
-		obs_data_t *settings = obs_source_get_settings(source);
-		bool match = strcmp(obs_source_get_id(source), "browser_source") == 0 &&
-			strcmp(obs_data_get_string(settings, "url"), url) == 0;
-		obs_data_release(settings);
-		if (!match) {
-			obs_source_release(source);
-			source = NULL;
-			snprintf(name, sizeof(name), "LAN Lens · %.12s · %.8s", id, key);
-		}
+	if (scene_has(scene, NULL, url)) {
+		obs_source_release(selected);
+		return "already-present";
 	}
+
+	struct source_search search = {.url = url};
+	obs_enum_sources(find_bound_source, &search);
+	obs_source_t *source = search.source;
 	if (!source) {
+		char base[100];
+		char name[120];
+		snprintf(base, sizeof(base), "LAN Lens · %.12s", id);
+		snprintf(name, sizeof(name), "%s", base);
+		for (unsigned suffix = 2;; ++suffix) {
+			obs_source_t *existing = obs_get_source_by_name(name);
+			if (!existing)
+				break;
+			obs_source_release(existing);
+			snprintf(name, sizeof(name), "%s · %u", base, suffix);
+		}
 		obs_data_t *settings = obs_data_create();
 		obs_data_set_string(settings, "url", url);
 		obs_data_set_int(settings, "width", 1280);
@@ -79,15 +189,102 @@ static void add_source(const char *id, const char *key)
 		source = obs_source_create("browser_source", name, settings, NULL);
 		obs_data_release(settings);
 	}
-	if (source) {
-		if (!obs_scene_find_source(scene, obs_source_get_name(source)))
-			obs_scene_add(scene, source);
-		obs_source_release(source);
-		blog(LOG_INFO, "[LAN Lens] Camera feed is in the current scene.");
-	} else {
-		blog(LOG_WARNING, "[LAN Lens] Browser Source is unavailable.");
-	}
+	bool added = source && obs_scene_add(scene, source);
+	obs_source_release(source);
 	obs_source_release(selected);
+	return added ? "added" : "failed";
+}
+
+struct binding_snapshot {
+	struct obs_frontend_source_list scenes;
+	obs_data_array_t *bindings;
+};
+
+static bool record_binding(void *data, obs_source_t *source)
+{
+	if (strcmp(obs_source_get_id(source), "browser_source") != 0)
+		return true;
+
+	struct binding_snapshot *snapshot = data;
+	const char prefix[] = LOCAL_URL "/view#";
+	obs_data_t *settings = obs_source_get_settings(source);
+	const char *url = obs_data_get_string(settings, "url");
+	char id[13] = {0}, key[33] = {0};
+	bool bound = !obs_data_get_bool(settings, "is_local_file") &&
+		     !strncmp(url, prefix, sizeof(prefix) - 1) &&
+		     strlen(url + sizeof(prefix) - 1) == 45 &&
+		     url[sizeof(prefix) - 1 + 12] == '.';
+	if (bound) {
+		memcpy(id, url + sizeof(prefix) - 1, 12);
+		memcpy(key, url + sizeof(prefix) - 1 + 13, 32);
+		bound = token_ok(id, 12) && token_ok(key, 32);
+	}
+	bool vacant = vacant_source(settings);
+ obs_data_release(settings);
+ if (!bound && !vacant)
+  return true;
+
+	obs_data_t *binding = obs_data_create();
+	if (bound) {
+  obs_data_set_string(binding, "id", id);
+  obs_data_set_string(binding, "key", key);
+ }
+	obs_data_set_string(binding, "name", obs_source_get_name(source));
+	obs_data_set_string(binding, "uuid", obs_source_get_uuid(source));
+	obs_data_array_t *scenes = obs_data_array_create();
+	for (size_t i = 0; i < snapshot->scenes.sources.num; ++i) {
+		obs_source_t *scene = snapshot->scenes.sources.array[i];
+		if (!scene_has(obs_scene_from_source(scene), source, NULL))
+			continue;
+		obs_data_t *entry = obs_data_create();
+		obs_data_set_string(entry, "name", obs_source_get_name(scene));
+		obs_data_array_push_back(scenes, entry);
+		obs_data_release(entry);
+	}
+	obs_data_set_array(binding, "scenes", scenes);
+	obs_data_array_release(scenes);
+	obs_data_array_push_back(snapshot->bindings, binding);
+	obs_data_release(binding);
+	return true;
+}
+
+static void publish_bindings(void)
+{
+	struct binding_snapshot snapshot = {0};
+	snapshot.bindings = obs_data_array_create();
+	obs_frontend_get_scenes(&snapshot.scenes);
+	obs_enum_sources(record_binding, &snapshot);
+	obs_frontend_source_list_free(&snapshot.scenes);
+
+	obs_data_t *data = obs_data_create();
+	obs_data_set_array(data, "bindings", snapshot.bindings);
+	char *path = obs_module_config_path("service/obs-bindings.json");
+	if (path)
+		obs_data_save_json_safe(data, path, "tmp", NULL);
+	bfree(path);
+	obs_data_release(data);
+	obs_data_array_release(snapshot.bindings);
+}
+
+static bool unlink_source(void *url, obs_source_t *source)
+{
+	if (source_matches(source, url)) {
+		obs_data_t *settings = obs_source_get_settings(source);
+		obs_data_set_string(settings, "url", "about:blank");
+		obs_source_update(source, settings);
+		obs_data_release(settings);
+	}
+	return true;
+}
+
+static void report_add(const char *request, const char *result)
+{
+	char name[64];
+	snprintf(name, sizeof(name), "service/obs-add-%s.txt", request);
+	char *path = obs_module_config_path(name);
+	if (path)
+		os_quick_write_utf8_file_safe(path, result, strlen(result), false, "tmp", NULL);
+	bfree(path);
 }
 
 static bool refresh_view(void *unused, obs_source_t *source)
@@ -120,14 +317,40 @@ static void handle_line(void *data)
 		if (!strcmp(line, "READY")) {
 			load_dashboard_url();
 			obs_enum_sources(refresh_view, NULL);
+			publish_bindings();
 			blog(LOG_INFO, "[LAN Lens] Local camera server is ready.");
+		} else if (!strcmp(line, "SNAPSHOT")) {
+			publish_bindings();
+		} else if (!strcmp(line, "OPEN_BROWSER")) {
+			open_dashboard_in_browser();
+		} else if (!strcmp(line, "OPEN_KOFI")) {
+			if (!open_dashboard("https://ko-fi.com/bitwraith21"))
+				blog(LOG_WARNING, "[LAN Lens] Could not open Ko-fi in the default browser.");
 		} else if (!strncmp(line, "ADD ", 4)) {
-			char id[13] = {0};
-			char key[33] = {0};
-			char extra;
-			if (sscanf(line + 4, "%12s %32s %c", id, key, &extra) == 2 &&
-			    token_ok(id, 12) && token_ok(key, 32))
-				add_source(id, key);
+			char id[13] = {0}, key[33] = {0}, request[13] = {0}, extra;
+			if (sscanf(line + 4, "%12s %32s %12s %c", id, key, request, &extra) == 3 &&
+			    token_ok(id, 12) && token_ok(key, 32) && token_ok(request, 12)) {
+				const char *result = add_source(id, key);
+				publish_bindings();
+				report_add(request, result);
+			}
+		} else if (!strncmp(line, "BIND ", 5)) {
+   char id[13] = {0}, key[33] = {0}, request[13] = {0}, uuid[37] = {0}, extra;
+   if (sscanf(line + 5, "%12s %32s %12s %36s %c", id, key, request, uuid, &extra) == 4 &&
+       token_ok(id, 12) && token_ok(key, 32) && token_ok(request, 12) && token_ok(uuid, 36)) {
+    const char *result = bind_source(id, key, uuid);
+    publish_bindings();
+    report_add(request, result);
+   }
+  } else if (!strncmp(line, "UNBIND ", 7)) {
+			char id[13] = {0}, key[33] = {0}, extra;
+			if (sscanf(line + 7, "%12s %32s %c", id, key, &extra) == 2 &&
+			    token_ok(id, 12) && token_ok(key, 32)) {
+				char url[128];
+				feed_url(url, sizeof(url), id, key);
+				obs_enum_sources(unlink_source, url);
+				publish_bindings();
+			}
 		} else if (!strcmp(line, "EXIT") || !strncmp(line, "ERROR ", 6)) {
 			set_dashboard_url(NULL);
 			blog(LOG_WARNING, "[LAN Lens] Local server stopped. See its server.log in the plugin configuration folder.");

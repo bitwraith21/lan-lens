@@ -12,7 +12,7 @@ func TestPortableSettingsRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	original := settings{Version: 1, LANAddress: "192.168.1.42", Slots: []slot{newSlot("Studio camera"), newSlot("Remote camera")}}
 	original.Slots[0].Rotation = 270
-	original.Slots[0].Camera = cameraPrefs{Facing: "user", Portrait: true, Eco: true, Zoom: 2.5}
+	original.Slots[0].Camera = cameraPrefs{Facing: "user", Portrait: true, Eco: true, Zoom: 2.5, Resolution: 540}
 	export := filepath.Join(dir, "export.json")
 	if err := saveSettings(export, original); err != nil {
 		t.Fatal(err)
@@ -51,5 +51,15 @@ func TestRejectInvalidImport(t *testing.T) {
 		if _, err := loadImport(path); err == nil {
 			t.Fatal("invalid import was accepted")
 		}
+	}
+}
+
+func TestRetiredOBSAccordionStillImports(t *testing.T) {
+	cfg, err := readSettings(strings.NewReader(`{"version":1,"slots":[],"accordions":{"obs-stats:":true,"trust:":true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Accordions["obs-stats:"]; ok || !cfg.Accordions["trust:"] {
+		t.Fatalf("unexpected accordion settings: %v", cfg.Accordions)
 	}
 }

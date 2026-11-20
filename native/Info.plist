@@ -5,7 +5,7 @@
 <key>CFBundleIdentifier</key><string>local.lanlens.obs.plugin</string>
 <key>CFBundleName</key><string>LAN Lens for OBS</string>
 <key>CFBundlePackageType</key><string>BNDL</string>
-<key>CFBundleVersion</key><string>3</string>
-<key>CFBundleShortVersionString</key><string>0.2.1</string>
+<key>CFBundleVersion</key><string>19</string>
+<key>CFBundleShortVersionString</key><string>0.2.17</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 </dict></plist>

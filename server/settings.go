@@ -13,10 +13,13 @@ import (
 )
 
 type cameraPrefs struct {
-	Facing   string  `json:"facing"`
-	Portrait bool    `json:"portrait"`
-	Eco      bool    `json:"eco"`
-	Zoom     float64 `json:"zoom"`
+	Facing     string  `json:"facing"`
+	Framing    string  `json:"framing,omitempty"`
+	Portrait   bool    `json:"portrait"`
+	Muted      bool    `json:"muted,omitempty"`
+	Eco        bool    `json:"eco"`
+	Zoom       float64 `json:"zoom"`
+	Resolution int     `json:"resolution,omitempty"`
 }
 
 type slot struct {
@@ -28,14 +31,16 @@ type slot struct {
 }
 
 type settings struct {
-	Version    int    `json:"version"`
-	LANAddress string `json:"lanAddress"`
-	Slots      []slot `json:"slots"`
+	Version    int             `json:"version"`
+	LANAddress string          `json:"lanAddress"`
+	Slots      []slot          `json:"slots"`
+	Accordions map[string]bool `json:"accordions,omitempty"`
 }
 
 var (
-	idPattern  = regexp.MustCompile("^[A-Za-z0-9_-]{12}$")
-	keyPattern = regexp.MustCompile("^[A-Za-z0-9_-]{32}$")
+	idPattern   = regexp.MustCompile("^[A-Za-z0-9_-]{12}$")
+	keyPattern  = regexp.MustCompile("^[A-Za-z0-9_-]{32}$")
+	uuidPattern = regexp.MustCompile("^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 )
 
 func randomID(n int) string {
@@ -48,8 +53,17 @@ func randBytes(n int) []byte {
 	return b
 }
 
+func accordionKey(section, id string) bool {
+	return ((section == "trust" || section == "https") && id == "") ||
+		(idPattern.MatchString(id) && (section == "setup" || section == "sources" || section == "controls" || section == "resolution"))
+}
+
+func validResolution(value int) bool {
+	return value == 0 || value == 360 || value == 540 || value == 720 || value == 1080
+}
+
 func validPrefs(c cameraPrefs) bool {
-	return (c.Facing == "user" || c.Facing == "environment") && c.Zoom >= 0 && c.Zoom <= 100
+	return (c.Framing == "" || c.Framing == "auto" || c.Framing == "crop") && validResolution(c.Resolution) && (c.Facing == "user" || c.Facing == "environment") && c.Zoom >= 0 && c.Zoom <= 100
 }
 
 func readSettings(in io.Reader) (settings, error) {
@@ -73,6 +87,14 @@ func readSettings(in io.Reader) (settings, error) {
 		}
 		ids[s.ID] = true
 	}
+	// Accept exports from versions that included the OBS statistics panel.
+	delete(cfg.Accordions, "obs-stats:")
+	for key := range cfg.Accordions {
+		section, id, ok := strings.Cut(key, ":")
+		if !ok || !accordionKey(section, id) || (id != "" && !ids[id]) {
+			return cfg, errors.New("invalid dashboard section")
+		}
+	}
 	if cfg.Slots == nil {
 		cfg.Slots = []slot{}
 	}
@@ -92,7 +114,7 @@ func loadSettings(path string) (settings, error) {
 }
 
 func newSlot(label string) slot {
-	return slot{ID: randomID(9), Label: label, ViewerKey: randomID(24), Camera: cameraPrefs{Facing: "environment"}}
+	return slot{ID: randomID(9), Label: label, ViewerKey: randomID(24), Camera: cameraPrefs{Facing: "environment", Portrait: true, Framing: "auto"}}
 }
 
 func writeAtomic(path string, data []byte) error {

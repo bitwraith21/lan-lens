@@ -8,6 +8,7 @@ extern "C" {
 void register_dashboard_dock(void);
 void show_dashboard_dock(bool attach);
 void set_dashboard_url(const char *url);
+void open_dashboard_in_browser(void);
 void destroy_dashboard_dock(void);
 
 #ifdef __cplusplus

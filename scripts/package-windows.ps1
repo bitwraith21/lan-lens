@@ -11,6 +11,10 @@ $Stage = (Resolve-Path $Stage).Path
 $LlvmBin = (Resolve-Path $LlvmBin).Path
 $WixBin = (Resolve-Path $WixBin).Path
 $Output = [IO.Path]::GetFullPath($Output)
+[xml] $manifest = Get-Content -Raw -LiteralPath "$project/installer/LANLens.wxs"
+$version = $manifest.Wix.Product.Version
+$notes = Join-Path $project "release-notes/v$version.md"
+if (!(Test-Path -LiteralPath $notes -PathType Leaf)) { throw "Missing release notes for v$version at $notes" }
 $build = Join-Path (Split-Path $Stage) 'msi-obj'
 New-Item -ItemType Directory -Force $build, (Split-Path $Output) | Out-Null
 $preflight = Join-Path $build 'preflight.dll'
@@ -38,7 +42,10 @@ $linkArguments = @(
 if ($SkipIceValidation) { $linkArguments += '-sval' }
 & "$WixBin/light.exe" @linkArguments
 if ($LASTEXITCODE) { throw 'WiX could not link or validate the MSI' }
+$notesOutput = Join-Path (Split-Path $Output) "LAN-Lens-$version-Release-Notes.md"
+Copy-Item -LiteralPath $notes -Destination $notesOutput
 Write-Output $Output
+Write-Output $notesOutput
 
 
 

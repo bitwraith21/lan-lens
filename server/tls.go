@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -125,14 +126,17 @@ func (a *authority) leaf(lan []string) (*tls.Certificate, error) {
 	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: parsed}, nil
 }
 
-func serverTLS(a *authority) (*tls.Config, error) {
+func serverTLS(a *authority, custom func() *hostTLS) (*tls.Config, error) {
 	lan := addresses()
 	cert, err := a.leaf(lan)
 	if err != nil {
 		return nil, err
 	}
 	var mu sync.Mutex
-	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		if identity := custom(); identity != nil && strings.EqualFold(hello.ServerName, identity.settings.Hostname) {
+			return &identity.certificate, nil
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		current := addresses()
